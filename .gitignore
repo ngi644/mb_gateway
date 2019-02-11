@@ -240,3 +240,8 @@ fabric.properties
 # Editor-based Rest Client
 .idea/httpRequests
 
+# config
+config.json
+config2.json
+
+.DS_Store
