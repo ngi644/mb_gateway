@@ -9,6 +9,7 @@ import uuid
 import threading
 import queue
 import logging
+import requests
 from datetime import date, datetime
 import json
 from argparse import ArgumentParser
@@ -25,7 +26,7 @@ mb_dict = {}
 known_devices = set()
 cn_timing = store_path = max_threads = None
 
-logging.basicConfig(filename='receive.log', level=logging.DEBUG)
+logging.basicConfig(filename='receive.log', level=logging.INFO)
 ble = Adafruit_BluefruitLE.get_provider()
 _queue = queue.Queue()
 
@@ -39,6 +40,7 @@ def default_serializer(obj):
 def _rx_received(data):
     value = dict(value=data, date=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     _queue.put(value)
+    print(_queue.qsize())
 
 
 def main():
@@ -105,65 +107,75 @@ def main():
                     logging.warning('no tx device')
         time.sleep(1.0)
 
+def check_connection():
+    try:
+        r = requests.get('https://firebase.google.com/')
+        print(r)
+        return True
+    except:
+        return False
+
 
 def cloud_worker(fb_cn):
     ct = 0
     user = None
     while True:
-        if not ct % 1800:
-            if fb_cn.users:
-                user = fb_cn.auth.sign_in_with_email_and_password(fb_cn.users[0]['user_id'], fb_cn.users[0]['passkey'])
-        ct += 1
-        try:
-            dataset = {}
-            item = _queue.get(timeout=1)
-            mb_data = item.get('value').strip()
-            print(mb_data)
-            dvice_name = mb_data[0:5]
-            status = int(mb_data[5:6])
-            clock = int(mb_data[6:9])
-            data_type = mb_data[9:10]
-            raw_data = mb_data[10:]
-            if data_type == 'B':
-                bme_data = int(raw_data)
-                r_temp = bme_data >> 20 & 0xFFF
-                if r_temp > 2048:
-                    temp = (r_temp - 4096) / 10.0
-                else:
-                    temp = r_temp / 10.0
-                press = (bme_data >> 10 & 0x3FF) + 400
-                humid = (bme_data >> 0 & 0x3FF) / 10.0
-                dataset = dict(dvice_name=dvice_name,
-                             status=status,
-                             Timestamp=item.get('date'),
-                             temp=temp,
-                             humid=humid,
-                             press=press
-                             )
-            if data_type == 'T':
-                dataset = dict(dvice_name=dvice_name,
-                               status=status,
-                               Timestamp=item.get('date'),
-                               temp=int(raw_data)
-                               )
-            if data_type == 'D':
-                f_temp = struct.unpack('<f', binascii.unhexlify(raw_data))
-                ### f_temp = float(raw_data) / 100
-                dataset = dict(dvice_name=dvice_name,
-                               status=status,
-                               Timestamp=item.get('date'),
-                               temp=f_temp[0]
-                               )
-            js_data = json.dumps(dataset, default=default_serializer)
-            # print(js_data)
-            # logging.info(js_data)
-            params = {}
-            if user:
-                params['token'] = user['idToken']
-            fb_cn.db.child('{}/{}'.format(store_path, mb_dict[dvice_name])).push(dataset, **params)
-        except queue.Empty:
-            logging.warning('no data')
-        time.sleep(0.5)
+        if check_connection():
+            if not ct % 900:
+                if fb_cn.users:
+                    user = fb_cn.auth.sign_in_with_email_and_password(fb_cn.users[0]['user_id'], fb_cn.users[0]['passkey'])
+            ct += 1
+            try:
+                dataset = {}
+                item = _queue.get(timeout=1)
+                logging.info(item)
+                mb_data = item.get('value').strip()
+                dvice_name = mb_data[0:5]
+                status = int(mb_data[5:6])
+                clock = int(mb_data[6:9])
+                data_type = mb_data[9:10]
+                raw_data = mb_data[10:]
+                if data_type == 'B':
+                    bme_data = int(raw_data)
+                    r_temp = bme_data >> 20 & 0xFFF
+                    if r_temp > 2048:
+                        temp = (r_temp - 4096) / 10.0
+                    else:
+                        temp = r_temp / 10.0
+                    press = (bme_data >> 10 & 0x3FF) + 400
+                    humid = (bme_data >> 0 & 0x3FF) / 10.0
+                    dataset = dict(dvice_name=dvice_name,
+                                status=status,
+                                Timestamp=item.get('date'),
+                                temp=temp,
+                                humid=humid,
+                                press=press
+                                )
+                if data_type == 'T':
+                    dataset = dict(dvice_name=dvice_name,
+                                status=status,
+                                Timestamp=item.get('date'),
+                                temp=int(raw_data)
+                                )
+                if data_type == 'D':
+                    f_temp = struct.unpack('<f', binascii.unhexlify(raw_data))
+                    ### f_temp = float(raw_data) / 100
+                    dataset = dict(dvice_name=dvice_name,
+                                status=status,
+                                Timestamp=item.get('date'),
+                                temp=f_temp[0]
+                                )
+                js_data = json.dumps(dataset, default=default_serializer)
+                params = {}
+                if user:
+                    params['token'] = user['idToken']
+                fb_cn.db.child('{}/{}'.format(store_path, mb_dict[dvice_name])).push(dataset, **params)
+            except queue.Empty:
+                logging.warning('no data')
+                
+        else:
+            logging.warning('no network')
+        time.sleep(1.0)
 
 
 if __name__ == '__main__':

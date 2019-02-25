@@ -12,7 +12,7 @@ class Firebase_CN:
         self.firebase = pyrebase.initialize_app(self.config)
         self.auth = self.firebase.auth()
         self.db = self.firebase.database()
-
+        
 
 if __name__ == '__main__':
     pass
