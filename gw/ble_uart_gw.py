@@ -11,10 +11,9 @@ import queue
 import logging
 from datetime import date, datetime
 import json
-from fb_connect import db, auth, users, cn_timing, store_path, max_threads
-
+from argparse import ArgumentParser
+from fb_connect import Firebase_CN
 import Adafruit_BluefruitLE
-from Adafruit_BluefruitLE.services import UART
 
 # Define service and characteristic UUIDs used by the UART service.
 UART_SERVICE_UUID = uuid.UUID('6E400001-B5A3-F393-E0A9-E50E24DCCA9E')
@@ -24,12 +23,10 @@ RX_CHAR_UUID = uuid.UUID('6E400003-B5A3-F393-E0A9-E50E24DCCA9E')
 microbits = set()
 mb_dict = {}
 known_devices = set()
+cn_timing = store_path = max_threads = None
 
 logging.basicConfig(filename='receive.log', level=logging.DEBUG)
-
 ble = Adafruit_BluefruitLE.get_provider()
-ble.initialize()
-
 _queue = queue.Queue()
 
 
@@ -40,7 +37,6 @@ def default_serializer(obj):
 
 
 def _rx_received(data):
-    #value = dict(value=data, date=datetime.now().isoformat())
     value = dict(value=data, date=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     _queue.put(value)
 
@@ -76,10 +72,10 @@ def main():
 
         found = set(ble.find_devices())
         new = found - known_devices - microbits
+        #print(new)
         for device in new:
-            print(u'Found devices: {0} [{1}]'.format(device.name, device.id))
-            if device.name is not None and "micro:bit" in device.name:
-                microbits.add(device)
+            if device.name is not None and "micro:bit" in device.name: 
+                print(u'Found devices: {0} [{1}]'.format(device.name, device.id))
                 re_text = re.findall("\[.*?\]", device.name)
                 if re_text:
                     device_name = re_text[0].replace('[', '').replace(']', '')
@@ -88,13 +84,19 @@ def main():
                 device.connect()
                 device.discover([UART_SERVICE_UUID], [TX_CHAR_UUID, RX_CHAR_UUID])
                 uart = device.find_service(UART_SERVICE_UUID)
-                txs.add(uart.find_characteristic(RX_CHAR_UUID))
-                rx = uart.find_characteristic(TX_CHAR_UUID)
-                rx.start_notify(_rx_received)
-                rxs.add(rx)
+                if uart:
+                    print(device_name)
+                    microbits.add(device)
+                    txs.add(uart.find_characteristic(RX_CHAR_UUID))
+                    rx = uart.find_characteristic(TX_CHAR_UUID)
+                    rx.start_notify(_rx_received)
+                    rxs.add(rx)
+                else:
+                    device.disconnect()
+                    known_devices.add(device)
             else:
                 known_devices.add(device)
-
+        
         if len(txs) > 0:
             for idx, tx in enumerate(txs, start=1):
                 if tx._device and tx._device.is_connected:
@@ -104,18 +106,18 @@ def main():
         time.sleep(1.0)
 
 
-def cloud_worker():
+def cloud_worker(fb_cn):
     ct = 0
     user = None
     while True:
         if not ct % 1800:
-            if users:
-                user = auth.sign_in_with_email_and_password(users[0]['user_id'], users[0]['passkey'])
+            if fb_cn.users:
+                user = fb_cn.auth.sign_in_with_email_and_password(fb_cn.users[0]['user_id'], fb_cn.users[0]['passkey'])
         ct += 1
         try:
             dataset = {}
             item = _queue.get(timeout=1)
-            mb_data = item.get('value')
+            mb_data = item.get('value').strip()
             print(mb_data)
             dvice_name = mb_data[0:5]
             status = int(mb_data[5:6])
@@ -146,6 +148,7 @@ def cloud_worker():
                                )
             if data_type == 'D':
                 f_temp = struct.unpack('<f', binascii.unhexlify(raw_data))
+                ### f_temp = float(raw_data) / 100
                 dataset = dict(dvice_name=dvice_name,
                                status=status,
                                Timestamp=item.get('date'),
@@ -157,7 +160,7 @@ def cloud_worker():
             params = {}
             if user:
                 params['token'] = user['idToken']
-            db.child('{}/{}'.format(store_path, mb_dict[dvice_name])).push(dataset, **params)
+            fb_cn.db.child('{}/{}'.format(store_path, mb_dict[dvice_name])).push(dataset, **params)
         except queue.Empty:
             logging.warning('no data')
         time.sleep(0.5)
@@ -165,8 +168,31 @@ def cloud_worker():
 
 if __name__ == '__main__':
 
+    desc = u'{0} [Args] [Options]\nDetailed options -h or --help'.format(__file__)
+    parser = ArgumentParser(description=desc)
+    parser.add_argument(
+        '-c', '--config-json-path',
+        type = str,         
+        dest = 'config_path',     
+        required = True,   
+        help = 'config file path'
+    )
+    args = parser.parse_args()
+
+    f = open(args.config_path, 'r')
+    main_config = json.load(f)
+    f.close()
+
+    cn_timing = int(main_config.get('timing', 10))
+    max_threads = int(main_config.get('max_threads', 1))
+    store_path = main_config.get('store_path', 'test')
+
+    fb_cn = Firebase_CN(main_config)
+
+    ble.initialize()
+
     for i in range(max_threads):
-        t = threading.Thread(target=cloud_worker)
+        t = threading.Thread(target=cloud_worker, args=(fb_cn,))
         t.daemon = True
         t.start()
 

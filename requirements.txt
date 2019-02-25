@@ -1,0 +1,2 @@
+Adafruit-BluefruitLE==0.9.10
+Pyrebase==3.0.27
