@@ -1,2 +1,4 @@
-Adafruit-BluefruitLE==0.9.10
+bluebrick-Adafruit-BluefruitLE
 Pyrebase==3.0.27
+#dbus-python
+#PyGObject

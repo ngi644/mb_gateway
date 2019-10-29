@@ -1,0 +1,16 @@
+{
+  "cloud_target": "firebase",
+  "store_path": "Device",
+  "config": {
+    "apiKey": "API-key",
+    "authDomain": "xxxxxx.firebaseapp.com",
+    "databaseURL": "https://xxxxxx.firebaseio.com",
+    "storageBucket": "xxxxxx.appspot.com"
+  },
+  "users": [
+    {
+      "user_id": "user_name",
+      "passkey": "pass"
+    }
+  ]
+}

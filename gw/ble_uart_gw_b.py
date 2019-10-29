@@ -31,7 +31,6 @@ ble = Adafruit_BluefruitLE.get_provider()
 _queue = queue.Queue()
 
 
-
 def default_serializer(obj):
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
@@ -60,8 +59,6 @@ def main():
     txs = set()
     rxs = set()
 
-    ct0 = 0
-
     while True:
         for mb in microbits.copy():
             if not mb.is_connected:
@@ -74,12 +71,6 @@ def main():
                 print('Disconnect to microbit')
                 microbits.remove(mb)
                 known_devices.clear()
-
-        if not ct0 % 100:
-            known_devices.clear()
-            logging.info('clear dv')
-            ct0 = 1
-
 
         found = set(ble.find_devices())
         new = found - known_devices - microbits
@@ -114,9 +105,7 @@ def main():
                     tx.write_value("{0:03d}".format(cn_timing))
                 else:
                     logging.warning('no tx device')
-        logging.info('now connected: {}'.format(len(microbits)))
-        time.sleep(0.1)
-        ct0 += 1
+        time.sleep(1.0)
 
 def check_connection():
     try:
@@ -124,7 +113,6 @@ def check_connection():
         print(r)
         return True
     except:
-        print('False')
         return False
 
 
@@ -132,7 +120,7 @@ def cloud_worker(fb_cn):
     ct = 0
     user = None
     while True:
-        if True:#check_connection():
+        if check_connection():
             if not ct % 900:
                 if fb_cn.users:
                     user = fb_cn.auth.sign_in_with_email_and_password(fb_cn.users[0]['user_id'], fb_cn.users[0]['passkey'])
@@ -187,7 +175,7 @@ def cloud_worker(fb_cn):
                 
         else:
             logging.warning('no network')
-        time.sleep(0.1)
+        time.sleep(1.0)
 
 
 if __name__ == '__main__':
